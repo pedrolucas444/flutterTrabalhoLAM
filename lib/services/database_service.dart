@@ -1,57 +1,141 @@
-import 'dart:convert';
-
-import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:async';
+import 'package:path/path.dart';
+import 'package:sqflite/sqflite.dart';
 import '../models/task.dart';
 
 class DatabaseService {
-  DatabaseService._privateConstructor();
+  static final DatabaseService instance = DatabaseService._init();
+  static Database? _database;
 
-  static final DatabaseService instance = DatabaseService._privateConstructor();
+  DatabaseService._init();
 
-  static const _key = 'tasks_storage_v1';
+  Future<Database> get database async {
+    if (_database != null) return _database!;
+    _database = await _initDB('tasks.db');
+    return _database!;
+  }
+
+  Future<Database> _initDB(String filePath) async {
+    final dbPath = await getDatabasesPath();
+    final path = join(dbPath, filePath);
+
+    return await openDatabase(
+      path,
+      version: 4,  // VERSÃO FINAL COM TODOS OS CAMPOS
+      onCreate: _createDB,
+      onUpgrade: _onUpgrade,
+    );
+  }
+
+  Future<void> _createDB(Database db, int version) async {
+    const idType = 'INTEGER PRIMARY KEY AUTOINCREMENT';
+    const textType = 'TEXT NOT NULL';
+    const intType = 'INTEGER NOT NULL';
+
+    await db.execute('''
+      CREATE TABLE tasks (
+        id $idType,
+        title $textType,
+        description $textType,
+        priority $textType,
+        completed $intType,
+        createdAt $textType,
+        photoPath TEXT,
+        completedAt TEXT,
+        completedBy TEXT,
+        latitude REAL,
+        longitude REAL,
+        locationName TEXT
+      )
+    ''');
+  }
+
+  Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    // Migração incremental para cada versão
+    if (oldVersion < 2) {
+      await db.execute('ALTER TABLE tasks ADD COLUMN photoPath TEXT');
+    }
+    if (oldVersion < 3) {
+      await db.execute('ALTER TABLE tasks ADD COLUMN completedAt TEXT');
+      await db.execute('ALTER TABLE tasks ADD COLUMN completedBy TEXT');
+    }
+    if (oldVersion < 4) {
+      await db.execute('ALTER TABLE tasks ADD COLUMN latitude REAL');
+      await db.execute('ALTER TABLE tasks ADD COLUMN longitude REAL');
+      await db.execute('ALTER TABLE tasks ADD COLUMN locationName TEXT');
+    }
+    print('✅ Banco migrado de v$oldVersion para v$newVersion');
+  }
+
+  // CRUD Methods
+  Future<Task> create(Task task) async {
+    final db = await instance.database;
+    final id = await db.insert('tasks', task.toMap());
+    return task.copyWith(id: id);
+  }
+
+  Future<Task?> read(int id) async {
+    final db = await instance.database;
+    final maps = await db.query(
+      'tasks',
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+
+    if (maps.isNotEmpty) {
+      return Task.fromMap(maps.first);
+    }
+    return null;
+  }
 
   Future<List<Task>> readAll() async {
-    final prefs = await SharedPreferences.getInstance();
-    final jsonString = prefs.getString(_key);
-    if (jsonString == null || jsonString.isEmpty) return <Task>[];
-    try {
-      final List<dynamic> data = jsonDecode(jsonString) as List<dynamic>;
-      final tasks = data.map((e) => Task.fromJson(e as Map<String, dynamic>)).toList();
-      tasks.sort((a, b) => b.createdAt.compareTo(a.createdAt));
-      return tasks;
-    } catch (_) {
-      return <Task>[];
-    }
+    final db = await instance.database;
+    const orderBy = 'createdAt DESC';
+    final result = await db.query('tasks', orderBy: orderBy);
+    return result.map((json) => Task.fromMap(json)).toList();
   }
 
-  Future<Task> create(Task task) async {
-    final tasks = await readAll();
-    // ensure unique id - if zero treat as new
-    final id = task.id == 0 ? DateTime.now().millisecondsSinceEpoch : task.id;
-    final newTask = task.copyWith(id: id);
-    tasks.insert(0, newTask);
-    await _saveAll(tasks);
-    return newTask;
+  Future<int> update(Task task) async {
+    final db = await instance.database;
+    return db.update(
+      'tasks',
+      task.toMap(),
+      where: 'id = ?',
+      whereArgs: [task.id],
+    );
   }
 
-  Future<void> update(Task task) async {
-    final tasks = await readAll();
-    final idx = tasks.indexWhere((t) => t.id == task.id);
-    if (idx != -1) {
-      tasks[idx] = task;
-      await _saveAll(tasks);
-    }
+  Future<int> delete(int id) async {
+    final db = await instance.database;
+    return await db.delete(
+      'tasks',
+      where: 'id = ?',
+      whereArgs: [id],
+    );
   }
 
-  Future<void> delete(int id) async {
-    final tasks = await readAll();
-    tasks.removeWhere((t) => t.id == id);
-    await _saveAll(tasks);
+  // Método especial: buscar tarefas por proximidade
+  Future<List<Task>> getTasksNearLocation({
+    required double latitude,
+    required double longitude,
+    double radiusInMeters = 1000,
+  }) async {
+    final allTasks = await readAll();
+    
+    return allTasks.where((task) {
+      if (!task.hasLocation) return false;
+      
+      // Cálculo de distância usando fórmula de Haversine (simplificada)
+      final latDiff = (task.latitude! - latitude).abs();
+      final lonDiff = (task.longitude! - longitude).abs();
+      final distance = ((latDiff * 111000) + (lonDiff * 111000)) / 2;
+      
+      return distance <= radiusInMeters;
+    }).toList();
   }
 
-  Future<void> _saveAll(List<Task> tasks) async {
-    final prefs = await SharedPreferences.getInstance();
-    final jsonString = jsonEncode(tasks.map((t) => t.toJson()).toList());
-    await prefs.setString(_key, jsonString);
+  Future close() async {
+    final db = await instance.database;
+    db.close();
   }
 }
