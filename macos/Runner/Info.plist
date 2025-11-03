@@ -28,5 +28,13 @@
 	<string>MainMenu</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+
+	<!-- Privacy descriptions for macOS -->
+	<key>NSCameraUsageDescription</key>
+	<string>Precisamos acessar a câmera para tirar fotos das suas tarefas.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Precisamos acessar suas fotos para selecionar imagens da galeria.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Precisamos salvar imagens na sua fototeca quando você optar por exportar/salvar.</string>
 </dict>
 </plist>

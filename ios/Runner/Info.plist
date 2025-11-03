@@ -45,5 +45,11 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+
+	<!-- Privacy descriptions for Camera and Photo Library -->
+	<key>NSCameraUsageDescription</key>
+	<string>Precisamos acessar a câmera para tirar fotos das suas tarefas.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Precisamos acessar suas fotos para selecionar imagens da galeria.</string>
 </dict>
 </plist>

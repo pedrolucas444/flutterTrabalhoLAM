@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
+import 'package:permission_handler/permission_handler.dart';
 import '../screens/camera_screen.dart';
 
 class CameraService {
@@ -52,6 +53,12 @@ class CameraService {
       return null;
     }
 
+    // Runtime permission (Android/iOS)
+    if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+      final granted = await _ensureCameraPermission(context);
+      if (!granted) return null;
+    }
+
     final camera = _cameras!.first;
     final controller = CameraController(
       camera,
@@ -91,6 +98,38 @@ class CameraService {
     }
   }
 
+  Future<bool> _ensureCameraPermission(BuildContext context) async {
+    try {
+      final status = await Permission.camera.status;
+      if (status.isGranted) return true;
+
+      final result = await Permission.camera.request();
+      if (result.isGranted) return true;
+
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              result.isPermanentlyDenied
+                  ? 'Permissão de câmera negada permanentemente. Abra as configurações para permitir.'
+                  : 'Permissão de câmera negada.',
+            ),
+            action: result.isPermanentlyDenied
+                ? SnackBarAction(
+                    label: 'Ajustes',
+                    onPressed: openAppSettings,
+                  )
+                : null,
+          ),
+        );
+      }
+
+      return false;
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<String> savePicture(XFile image) async {
     try {
       if (kIsWeb) {
@@ -103,6 +142,7 @@ class CameraService {
         return dataUri;
       }
 
+      // Ensure directory exists in app documents dir
       final appDir = await getApplicationDocumentsDirectory();
       final fileName = 'task_${DateTime.now().millisecondsSinceEpoch}.jpg';
       final savePath = path.join(appDir.path, 'images', fileName);

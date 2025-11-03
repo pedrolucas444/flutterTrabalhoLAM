@@ -1,4 +1,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Camera & Media permissions -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <!-- For Android 13+ (API 33+) to read user-selected images -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <!-- Backwards compatibility for Android <= 12 (API 32) -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <application
         android:label="lista_compras_simples"
         android:name="${applicationName}"

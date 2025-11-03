@@ -1,6 +1,9 @@
 import 'dart:io';
+import 'dart:convert';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:permission_handler/permission_handler.dart';
 import '../models/task.dart';
 import '../services/database_service.dart';
 import '../services/camera_service.dart';
@@ -73,6 +76,43 @@ class _TaskFormScreenState extends State<TaskFormScreen> {
 
   Future<void> _pickFromGallery() async {
     try {
+      // Runtime permission for gallery/photos (Android/iOS)
+      if (!kIsWeb) {
+        bool allowed = false;
+        if (Platform.isIOS) {
+          final status = await Permission.photos.status;
+          allowed = status.isGranted || (await Permission.photos.request()).isGranted;
+        } else if (Platform.isAndroid) {
+          // On Android 13+ this maps to READ_MEDIA_IMAGES; on older to READ_EXTERNAL_STORAGE
+          var status = await Permission.photos.status;
+          if (status.isDenied || status.isRestricted) {
+            status = await Permission.photos.request();
+          }
+          allowed = status.isGranted;
+
+          // Fallback for some devices
+          if (!allowed) {
+            var storageStatus = await Permission.storage.status;
+            if (storageStatus.isDenied || storageStatus.isRestricted) {
+              storageStatus = await Permission.storage.request();
+            }
+            allowed = storageStatus.isGranted;
+          }
+        }
+
+        if (!allowed) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: const Text('Permissão da galeria negada'),
+                action: SnackBarAction(label: 'Ajustes', onPressed: openAppSettings),
+              ),
+            );
+          }
+          return;
+        }
+      }
+
       final picker = ImagePicker();
       final picked = await picker.pickImage(source: ImageSource.gallery, imageQuality: 85);
       if (picked != null && mounted) {
@@ -82,7 +122,7 @@ class _TaskFormScreenState extends State<TaskFormScreen> {
           setState(() => _photoPaths.add(saved));
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('�️ Imagem adicionada!'),
+              content: Text('🖼️ Imagem adicionada!'),
               backgroundColor: Colors.green,
               duration: Duration(seconds: 2),
             ),
@@ -128,11 +168,67 @@ class _TaskFormScreenState extends State<TaskFormScreen> {
           ),
           body: Center(
             child: InteractiveViewer(
-              child: Image.file(File(path), fit: BoxFit.contain),
+              child: _buildFullImage(path),
             ),
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildFullImage(String p) {
+    // On web we store data URIs; decode and render from memory
+    if (p.startsWith('data:')) {
+      try {
+        final base64Str = p.split(',').last;
+        final bytes = base64Decode(base64Str);
+        return Image.memory(bytes, fit: BoxFit.contain);
+      } catch (_) {
+        return _missingImagePlaceholder('Imagem inválida');
+      }
+    }
+
+    if (kIsWeb) {
+      // Flutter Web não suporta Image.file; mostre placeholder
+      return _missingImagePlaceholder('Imagem indisponível no Web');
+    }
+
+    return Image.file(File(p), fit: BoxFit.contain, errorBuilder: (c, e, s) => _missingImagePlaceholder('Foto não encontrada'));
+  }
+
+  Widget _buildThumb(String p) {
+    if (p.startsWith('data:')) {
+      try {
+        final base64Str = p.split(',').last;
+        final bytes = base64Decode(base64Str);
+        return Image.memory(bytes, width: double.infinity, height: double.infinity, fit: BoxFit.cover);
+      } catch (_) {
+        return _thumbPlaceholder();
+      }
+    }
+    if (kIsWeb) return _thumbPlaceholder();
+
+    return Image.file(
+      File(p),
+      width: double.infinity,
+      height: double.infinity,
+      fit: BoxFit.cover,
+      errorBuilder: (c, e, s) => _thumbPlaceholder(),
+    );
+  }
+
+  Widget _thumbPlaceholder() {
+    return Container(color: Colors.grey[200], child: const Center(child: Icon(Icons.broken_image, color: Colors.grey)));
+  }
+
+  Widget _missingImagePlaceholder(String label) {
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        const Icon(Icons.broken_image_outlined, color: Colors.white54, size: 48),
+        const SizedBox(height: 8),
+        Text(label, style: const TextStyle(color: Colors.white70)),
+      ],
     );
   }
 
@@ -415,11 +511,16 @@ class _TaskFormScreenState extends State<TaskFormScreen> {
                     Row(
                       children: [
                         Expanded(
-                          child: OutlinedButton.icon(
-                            onPressed: _takePicture,
-                            icon: const Icon(Icons.camera_alt),
-                            label: const Text('Tirar Foto'),
-                            style: OutlinedButton.styleFrom(padding: const EdgeInsets.all(14)),
+                          child: Tooltip(
+                            message: CameraService.instance.hasCameras
+                                ? 'Abrir câmera'
+                                : 'Câmera não disponível neste dispositivo',
+                            child: OutlinedButton.icon(
+                              onPressed: CameraService.instance.hasCameras ? _takePicture : null,
+                              icon: const Icon(Icons.camera_alt),
+                              label: const Text('Tirar Foto'),
+                              style: OutlinedButton.styleFrom(padding: const EdgeInsets.all(14)),
+                            ),
                           ),
                         ),
                         const SizedBox(width: 12),
@@ -455,13 +556,7 @@ class _TaskFormScreenState extends State<TaskFormScreen> {
                                 onTap: () => _viewPhotoAt(i),
                                 child: ClipRRect(
                                   borderRadius: BorderRadius.circular(8),
-                                  child: Image.file(
-                                    File(p),
-                                    width: double.infinity,
-                                    height: double.infinity,
-                                    fit: BoxFit.cover,
-                                    errorBuilder: (c, e, st) => Container(color: Colors.grey[200]),
-                                  ),
+                                  child: _buildThumb(p),
                                 ),
                               ),
                               Positioned(
